@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.1.0
+## 1.4.0
 
 - Packaging: the three cards are now built into one file, `dist/nevvyn-cards.js` (sources in `src/`, built by
   `node scripts/build.mjs`). The Marketplace and HACS only download the file named in `hacs.json`, so the

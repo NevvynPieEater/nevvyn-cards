@@ -30,7 +30,7 @@ Same custom repository, category **Dashboard**.
 ### Manual
 
 Copy `dist/nevvyn-cards.js` to `/config/www/community/nevvyn-cards/`, then add the resource
-`/local/community/nevvyn-cards/nevvyn-cards.js?v=1.1.0` as a **JavaScript Module**. Change the `?v=` value each time you replace the file so browsers fetch the new copy.
+`/local/community/nevvyn-cards/nevvyn-cards.js?v=1.4.0` as a **JavaScript Module**. Change the `?v=` value each time you replace the file so browsers fetch the new copy.
 
 ## Updates and caching
 
