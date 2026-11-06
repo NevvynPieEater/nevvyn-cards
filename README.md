@@ -78,11 +78,14 @@ The curve is the whole day and night on one scale, so a higher sun or moon draws
 | `chart_height` | Chart height in px, 80 to 800 |
 | `arrays_chart_height` | Height of the arrays chart (advanced) |
 | `sun_size` | Sun marker radius in px, 4 to 40 |
+| `weather_entity` | A `weather.*` entity: clouds, rain, snow, fog or lightning are drawn over the sun and moon |
+| `cloud_entity` | Optional sensor with cloud cover in %, overrides the weather entity's cloud coverage |
+| `weather` | `true` (default), `false`, or an on/off entity such as `input_boolean.sun_weather` to switch the effects live |
 | `moon` | `false` hides the dashed moon track and phase-shaded moon (on by default) |
 | `fit` | `true` stretches the chart to fill the card's grid cell |
 | `show` | `header`, `times`, `events`, `chart`: set any to `false` to hide it |
 | `sections` | `stats`, `timeline`, `arrays`, `tiles` (advanced) |
-| `colors` | `background`, `text`, `text_secondary`, `surface`, `line`, `day`, `night`, `curve`, `sun`, `moon`, `gold`, `accent` |
+| `colors` | `background`, `text`, `text_secondary`, `surface`, `line`, `day`, `night`, `curve`, `sun`, `moon`, `cloud`, `rain`, `gold`, `accent` |
 | `time_format` | `12` or `24` |
 | `latitude`, `longitude`, `time_zone` | Override the Home Assistant location |
 

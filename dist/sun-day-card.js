@@ -1,5 +1,5 @@
 /**
- * sun-day-card.js  v1.2.0
+ * sun-day-card.js  v1.3.0
  *
  * A Lovelace card showing the sun's day as an infographic: sunrise / sunset, dawn / dusk, solar noon,
  * an elevation curve with the sun's live position, and (advanced variant) daylight length with the
@@ -50,6 +50,9 @@
  *   chart_height: 220         # chart height in px (default: a width-based ratio)
  *   arrays_chart_height: 160  # same for the solar arrays chart (advanced)
  *   sun_size: 14              # sun dot radius in px
+ *   weather: true             # true | false, or an on/off entity (input_boolean.xxx) to switch the effects live
+ *   weather_entity: weather.home   # optional: clouds, rain, snow, fog or lightning drawn over the sun / moon
+ *   cloud_entity: sensor.cloud_cover  # optional: cloud cover in % (overrides the weather entity's cloud_coverage)
  *   moon: true                # dashed moon track and a phase-shaded moon (false hides it)
  *   fit: true                 # fill the card's grid cell and stretch the chart into the spare height.
  *                             #   Resize the card in the sections layout editor (or set grid_options)
@@ -67,7 +70,7 @@
  * what the array is doing right now.
  */
 (() => {
-  const VERSION = '1.2.0';
+  const VERSION = '1.3.0';
   if (customElements.get('sun-day-card')) return;
 
   const D2R = Math.PI / 180;
@@ -240,11 +243,28 @@
     };
   }
 
+
+  /* ---------- weather look (from a weather entity's state) ---------- */
+
+  function weatherLook(state, attrs, cloudPct) {
+    const m = {
+      'sunny': [0], 'clear-night': [0], 'partlycloudy': [0.45], 'cloudy': [0.85], 'windy': [0.25], 'windy-variant': [0.6],
+      'fog': [0.55, 0, 0, 1], 'rainy': [0.9, 1], 'pouring': [1, 2], 'lightning': [0.95, 0, 0, 0, 1],
+      'lightning-rainy': [1, 1, 0, 0, 1], 'hail': [0.95, 2], 'snowy': [0.9, 0, 1], 'snowy-rainy': [0.9, 1, 1],
+      'exceptional': [0.6],
+    }[state];
+    if (!m) return null;
+    let cloud = m[0];
+    const cc = cloudPct !== null && cloudPct !== undefined ? cloudPct : parseFloat(attrs && attrs.cloud_coverage);
+    if (Number.isFinite(cc)) cloud = clamp(cc / 100, 0, 1);
+    return { cloud, rain: m[1] || 0, snow: m[2] || 0, fog: m[3] || 0, bolt: m[4] || 0, state };
+  }
+
   /* ---------- styles ---------- */
 
   const BASE_CSS = `
     :host { display:block; }
-    ha-card { overflow:hidden; background:var(--sc-bg); color:var(--sc-fg); --sc-moon:var(--sdc-moon, #9fb0ff); }
+    ha-card { overflow:hidden; background:var(--sc-bg); color:var(--sc-fg); --sc-moon:var(--sdc-moon, #9fb0ff); --sc-cloud:var(--sdc-cloud, #aab6c6); --sc-rain:var(--sdc-rain, #5aa9f0); }
     .sc { font-size:calc(1rem * var(--sc-fs, 1)); padding:1em 1.1em .9em; }
     .hd { display:flex; align-items:center; gap:.75em; margin:-1em -1.1em .9em; padding:.9em 1.1em; }
     ha-card.fit { height:100%; }
@@ -308,6 +328,12 @@
     .s-moon-bg { fill:var(--sc-moon); opacity:.28; }
     .s-moon-lit { fill:var(--sc-moon); }
     .mdim { opacity:.6; }
+    .s-cl circle, .s-cl rect { fill:var(--sc-cloud); stroke:color-mix(in srgb, var(--sc-cloud) 70%, #000); stroke-width:.6; }
+    .s-cl { paint-order:fill; }
+    .s-fog { fill:var(--sc-cloud); opacity:.7; }
+    .s-rain { stroke:var(--sc-rain); stroke-width:1.8; stroke-linecap:round; }
+    .s-snow { fill:#fff; stroke:var(--sc-cloud); stroke-width:.5; }
+    .s-bolt { fill:#ffd54f; stroke:#b8860b; stroke-width:.6; }
     .s-ax { fill:var(--sc-dim); font-size:.72em; }
     .s-wl { fill:var(--sc-dim); font-size:.68em; }
     @media (max-width:420px) { .big { font-size:1.6em; } }
@@ -437,7 +463,7 @@
         return v === undefined || v === null || v === '' || !Number.isFinite(n) ? null : clamp(n, lo, hi);
       };
       const COLOR_VARS = { background: 'bg', text: 'fg', text_secondary: 'dim', surface: 'surface', line: 'line',
-        day: 'day', night: 'night', curve: 'curve', sun: 'sun', moon: 'moon', gold: 'gold', accent: 'accent' };
+        day: 'day', night: 'night', curve: 'curve', sun: 'sun', moon: 'moon', cloud: 'cloud', rain: 'rain', gold: 'gold', accent: 'accent' };
       const fontScale = numOpt(config.font_scale, 0.5, 3) || 1;
       let vars = `--sc-fs:${fontScale};`;
       if (config.colors !== undefined) {
@@ -469,6 +495,9 @@
         arrays_chart_height: numOpt(config.arrays_chart_height, 80, 600),
         sun_size: numOpt(config.sun_size, 4, 40),
         moon: config.moon !== false,
+        weather: config.weather === undefined ? true : config.weather,
+        weather_entity: config.weather_entity || null,
+        cloud_entity: config.cloud_entity || null,
         fit: config.fit === true,
         show,
       };
@@ -666,6 +695,13 @@
       const attrEl = st ? parseFloat(st.attributes && st.attributes.elevation) : NaN;
       const attrAz = st ? parseFloat(st.attributes && st.attributes.azimuth) : NaN;
       const moonNow = moonPos(now.getTime(), lat, lon);
+      // weather: false hides it; weather: input_boolean.xxx (any on/off entity) turns it on and off live
+      const wOn = typeof cfg.weather === 'string' ? ((h.states[cfg.weather] || {}).state === 'on') : cfg.weather !== false;
+      const wst = wOn && cfg.weather_entity ? h.states[cfg.weather_entity] : undefined;
+      const cst = wOn && cfg.cloud_entity ? h.states[cfg.cloud_entity] : undefined;
+      const cpct = cst && Number.isFinite(parseFloat(cst.state)) ? parseFloat(cst.state) : null;
+      const wx = wst || cst ? weatherLook(wst ? wst.state : 'cloudy', wst ? wst.attributes : null, cpct) : null;
+      if (cst && !wst && wx) { wx.rain = 0; wx.snow = 0; wx.fog = 0; wx.bolt = 0; }
       const elev = Number.isFinite(attrEl) ? attrEl : comp.el;
       const az = Number.isFinite(attrAz) ? attrAz : comp.az;
 
@@ -677,18 +713,18 @@
       const tiles = cfg.tiles.map((t) => ({ t, st: h.states[t.entity] }));
 
       const sig = [
-        Math.floor(tp.min), elev.toFixed(1), moonNow.el.toFixed(1), az.toFixed(0), key, this._h12(), this._cw, this._chh,
+        Math.floor(tp.min), elev.toFixed(1), moonNow.el.toFixed(1), az.toFixed(0), key, wOn ? 1 : 0, wx ? `${wx.state}${wx.cloud}` : '', this._h12(), this._cw, this._chh,
         arrs.map((x) => `${x.w}|${x.energy}`).join(','),
         tiles.map((x) => (x.st ? x.st.state : '')).join(','),
       ].join('#');
       if (sig === this._sig) return;
       this._sig = sig;
-      this._root.innerHTML = this._render({ cfg, day, nowMin: tp.min, elev, az, arrs, tiles, moonNow });
+      this._root.innerHTML = this._render({ cfg, day, nowMin: tp.min, elev, az, arrs, tiles, moonNow, wx });
     }
 
     /* --- rendering --- */
 
-    _chart(day, nowMin, elev, adv, moonNow) {
+    _chart(day, nowMin, elev, adv, moonNow, wx) {
       const { W, H } = this._dims(adv);
       const fs = Math.max(1, this._config.font_scale);
       const r = this._sunR(W, adv);
@@ -730,6 +766,28 @@
         });
         mk.push(`<line class="s-mk d" x1="${f1(X(ev.noon))}" x2="${f1(X(ev.noon))}" y1="${f1(Y(ev.peak))}" y2="${bot}"/>`);
       }
+      // weather drawn over a body: cloud cover dims it and drifts clouds across it; rain, snow, fog, lightning on top
+      const fx = (cx, cy, br) => {
+        if (!wx) return '';
+        let o = '';
+        const sz = br * 1.15;
+        const cloudAt = (x, y, k) => `<g class="s-cl" opacity="${f1(clamp(0.5 + 0.45 * wx.cloud, 0, 0.95))}"><circle cx="${f1(x - 0.8 * sz * k)}" cy="${f1(y + 0.25 * sz * k)}" r="${f1(0.55 * sz * k)}"/><circle cx="${f1(x)}" cy="${f1(y - 0.1 * sz * k)}" r="${f1(0.78 * sz * k)}"/><circle cx="${f1(x + 0.85 * sz * k)}" cy="${f1(y + 0.25 * sz * k)}" r="${f1(0.5 * sz * k)}"/><rect x="${f1(x - 1.35 * sz * k)}" y="${f1(y + 0.2 * sz * k)}" width="${f1(2.5 * sz * k)}" height="${f1(0.6 * sz * k)}" rx="${f1(0.3 * sz * k)}"/></g>`;
+        if (wx.cloud > 0.08) {
+          o += cloudAt(cx + (wx.cloud < 0.6 ? 0.55 * br : 0), cy + (wx.cloud < 0.6 ? 0.35 * br : 0.1 * br), wx.cloud < 0.6 ? 0.85 : 1.1);
+          if (wx.cloud >= 0.6) o += cloudAt(cx - 0.9 * br, cy - 0.35 * br, 0.8);
+        }
+        if (wx.fog) for (let i = -1; i <= 1; i++) o += `<rect class="s-fog" x="${f1(cx - 1.7 * br)}" y="${f1(cy + i * 0.7 * br - 0.12 * br)}" width="${f1(3.4 * br)}" height="${f1(0.28 * br)}" rx="${f1(0.14 * br)}"/>`;
+        const n = wx.rain ? 3 + 2 * wx.rain : 0;
+        for (let i = 0; i < n; i++) {
+          const x = cx - 1.1 * br + (i + 0.5) * (2.2 * br / n);
+          const y = cy + 1.05 * br + (i % 2) * 0.35 * br;
+          o += `<line class="s-rain" x1="${f1(x)}" y1="${f1(y)}" x2="${f1(x - 0.28 * br)}" y2="${f1(y + 0.8 * br)}"/>`;
+        }
+        if (wx.snow) for (let i = 0; i < 5; i++) o += `<circle class="s-snow" cx="${f1(cx - 1.0 * br + i * 0.5 * br)}" cy="${f1(cy + 1.25 * br + (i % 2) * 0.55 * br)}" r="${f1(Math.max(1.4, 0.16 * br))}"/>`;
+        if (wx.bolt) o += `<path class="s-bolt" d="M${f1(cx + 0.1 * br)},${f1(cy + 0.5 * br)}l${f1(-0.45 * br)},${f1(0.95 * br)}h${f1(0.4 * br)}l${f1(-0.25 * br)},${f1(0.85 * br)}l${f1(0.85 * br)},${f1(-1.2 * br)}h${f1(-0.45 * br)}l${f1(0.3 * br)},${f1(-0.6 * br)}z"/>`;
+        return o;
+      };
+      const dimBy = (k) => (wx ? f1(1 - 0.55 * wx.cloud * k) : '1');
       let moonSvg = '';
       if (this._config.moon !== false && day.moon) {
         const X2 = (i) => X(i * 10);
@@ -744,7 +802,8 @@
         const lit = `M${f1(mx)},${f1(my - mr)}A${f1(mr)},${f1(mr)} 0 0 ${sweepA} ${f1(mx)},${f1(my + mr)}A${f1(rx)},${f1(mr)} 0 0 ${sweepB} ${f1(mx)},${f1(my - mr)}Z`;
         moonSvg = `<path class="s-mo" d="${mline}"/>
           <g class="${moonNow.el < 0 ? 'mdim' : ''}"><circle class="s-moon-bg" cx="${f1(mx)}" cy="${f1(my)}" r="${f1(mr)}"/>
-          <path class="s-moon-lit" d="${lit}"/></g>`;
+          <path class="s-moon-lit" d="${lit}"/></g>
+          ${moonNow.el > 0 ? fx(mx, my, mr) : ''}`;
       }
       const dim = elev < -0.833 ? ' dim' : '';
       let axis = '';
@@ -768,8 +827,10 @@
           ${moonSvg}
           ${gold ? `<path class="s-gold" d="${gold}"/>` : ''}
           ${adv ? `<line class="s-now" x1="${f1(nowX)}" x2="${f1(nowX)}" y1="${top}" y2="${bot}"/>` : ''}
-          <circle class="s-halo" cx="${f1(nowX)}" cy="${f1(Y(elev))}" r="${r + 5}"/>
-          <circle class="s-sun${dim}" cx="${f1(nowX)}" cy="${f1(Y(elev))}" r="${r}"/>
+          <g opacity="${elev > -0.833 ? dimBy(1) : '1'}">
+          <circle class="s-halo" cx="${f1(nowX)}" cy="${f1(Y(elev))}" r="${f1(r + 5 - (wx ? 4 * wx.cloud : 0))}"/>
+          <circle class="s-sun${dim}" cx="${f1(nowX)}" cy="${f1(Y(elev))}" r="${r}"/></g>
+          ${elev > -0.833 ? fx(nowX, Y(elev), r) : ''}
           ${axis}
         </svg>`;
     }
@@ -814,7 +875,7 @@
         </svg>`;
     }
 
-    _render({ cfg, day, nowMin, elev, az, arrs, tiles, moonNow }) {
+    _render({ cfg, day, nowMin, elev, az, arrs, tiles, moonNow, wx }) {
       const L = cfg.labels;
       const h12 = this._h12();
       const hm = (m) => this._hm(m, h12);
@@ -852,7 +913,7 @@
             <div><div class="lbl">${esc(L.sunrise)}</div><div class="big">${hm(ev.sunrise)}</div></div>
             <div class="r"><div class="lbl">${esc(L.sunset)}</div><div class="big">${hm(ev.sunset)}</div></div>
           </div>
-          <div class="chw main"${sunEntity}>${this._chart(day, nowMin, elev, false, moonNow)}</div>
+          <div class="chw main"${sunEntity}>${this._chart(day, nowMin, elev, false, moonNow, wx)}</div>
           <div class="bottom">
             <div><div class="lbl">${esc(L.dawn)}</div><div class="v">${hm(ev.dawn)}</div></div>
             <div><div class="lbl">${esc(L.noon)}</div><div class="v">${hm(ev.noon)}</div></div>
@@ -875,7 +936,7 @@
           <div class="c"><div class="lbl">${esc(L.daylight)}</div><div class="big">${this._dur(day.len)}</div>${delta}</div>
           <div class="r"><div class="lbl">${esc(L.sunset)}</div><div class="big">${hm(ev.sunset)}</div></div>
         </div>
-        <div class="chw main"${sunEntity}>${this._chart(day, nowMin, elev, true, moonNow)}</div>`;
+        <div class="chw main"${sunEntity}>${this._chart(day, nowMin, elev, true, moonNow, wx)}</div>`;
 
       if (cfg.sections.stats) {
         const dir = COMPASS[Math.round(az / 22.5) % 16];
