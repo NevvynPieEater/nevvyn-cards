@@ -66,7 +66,7 @@ arrays:
     color: "#f2a43a"
 ```
 
-Everything is computed in the browser from your Home Assistant location and time zone. If `sun.sun` exists, its elevation and azimuth drive the live sun marker.
+The curve is the whole day and night on one scale, so a higher sun or moon draws taller. Everything is computed in the browser from your Home Assistant location and time zone. If `sun.sun` exists, its elevation and azimuth drive the live sun marker.
 
 ### Layout and styling options
 
@@ -78,10 +78,11 @@ Everything is computed in the browser from your Home Assistant location and time
 | `chart_height` | Chart height in px, 80 to 800 |
 | `arrays_chart_height` | Height of the arrays chart (advanced) |
 | `sun_size` | Sun marker radius in px, 4 to 40 |
+| `moon` | `false` hides the dashed moon track and phase-shaded moon (on by default) |
 | `fit` | `true` stretches the chart to fill the card's grid cell |
 | `show` | `header`, `times`, `events`, `chart`: set any to `false` to hide it |
 | `sections` | `stats`, `timeline`, `arrays`, `tiles` (advanced) |
-| `colors` | `background`, `text`, `text_secondary`, `surface`, `line`, `day`, `night`, `curve`, `sun`, `gold`, `accent` |
+| `colors` | `background`, `text`, `text_secondary`, `surface`, `line`, `day`, `night`, `curve`, `sun`, `moon`, `gold`, `accent` |
 | `time_format` | `12` or `24` |
 | `latitude`, `longitude`, `time_zone` | Override the Home Assistant location |
 

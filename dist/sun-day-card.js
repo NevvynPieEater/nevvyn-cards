@@ -1,5 +1,5 @@
 /**
- * sun-day-card.js  v1.1.0
+ * sun-day-card.js  v1.2.0
  *
  * A Lovelace card showing the sun's day as an infographic: sunrise / sunset, dawn / dusk, solar noon,
  * an elevation curve with the sun's live position, and (advanced variant) daylight length with the
@@ -50,12 +50,13 @@
  *   chart_height: 220         # chart height in px (default: a width-based ratio)
  *   arrays_chart_height: 160  # same for the solar arrays chart (advanced)
  *   sun_size: 14              # sun dot radius in px
+ *   moon: true                # dashed moon track and a phase-shaded moon (false hides it)
  *   fit: true                 # fill the card's grid cell and stretch the chart into the spare height.
  *                             #   Resize the card in the sections layout editor (or set grid_options)
  *   show: { header: true, times: true, events: true, chart: true }   # hide or force pieces (all variants)
  *   colors:                   # override any colour for this card
  *     day: "#ffd54f"          #   background, text, text_secondary, surface, line, day, night, curve,
- *     night: "#283593"        #   sun, gold, accent
+ *     night: "#283593"        #   sun, moon, gold, accent
  *     sun: "#ff7043"
  *   The chart is redrawn at the card's real pixel width, so it stays sharp at any size.
  *   Themes and card-mod can set the same colours as CSS variables: --sdc-day, --sdc-night, --sdc-sun,
@@ -66,7 +67,7 @@
  * what the array is doing right now.
  */
 (() => {
-  const VERSION = '1.1.0';
+  const VERSION = '1.2.0';
   if (customElements.get('sun-day-card')) return;
 
   const D2R = Math.PI / 180;
@@ -170,6 +171,52 @@
     return { el, az };
   }
 
+
+  /* ---------- moon maths (Meeus ch. 47, main terms: about 0.3 degrees) ---------- */
+
+  function moonPos(ms, lat, lon) {
+    const jd = ms / 86400000 + 2440587.5;
+    const T = (jd - 2451545) / 36525;
+    const Lp = mod(218.3164477 + 481267.88123421 * T, 360);
+    const Dd = mod(297.8501921 + 445267.1114034 * T, 360);
+    const Ms = mod(357.5291092 + 35999.0502909 * T, 360);
+    const Mm = mod(134.9633964 + 477198.8675055 * T, 360);
+    const F = mod(93.272095 + 483202.0175233 * T, 360);
+    const d = (x) => x * D2R;
+    const sn = (a, b, c, e) => Math.sin(d(a * Dd + b * Ms + c * Mm + e * F));
+    const cs = (a, b, c, e) => Math.cos(d(a * Dd + b * Ms + c * Mm + e * F));
+    const sl = 6288774 * sn(0, 0, 1, 0) + 1274027 * sn(2, 0, -1, 0) + 658314 * sn(2, 0, 0, 0) +
+      213618 * sn(0, 0, 2, 0) - 185116 * sn(0, 1, 0, 0) - 114332 * sn(0, 0, 0, 2) +
+      58793 * sn(2, 0, -2, 0) + 57066 * sn(2, -1, -1, 0) + 53322 * sn(2, 0, 1, 0) + 45758 * sn(2, -1, 0, 0) -
+      40923 * sn(0, 1, -1, 0) - 34720 * sn(1, 0, 0, 0) - 30383 * sn(0, 1, 1, 0) + 15327 * sn(2, 0, 0, -2) -
+      12528 * sn(0, 0, 1, 2) + 10980 * sn(0, 0, 1, -2);
+    const sb = 5128122 * sn(0, 0, 0, 1) + 280602 * sn(0, 0, 1, 1) + 277693 * sn(0, 0, 1, -1) +
+      173237 * sn(2, 0, 0, -1) + 55413 * sn(2, 0, -1, 1) + 46271 * sn(2, 0, -1, -1) + 32573 * sn(2, 0, 0, 1) +
+      17198 * sn(0, 0, 2, 1) + 9266 * sn(2, 0, 1, -1) + 8822 * sn(0, 0, 2, -1);
+    const sr = -20905355 * cs(0, 0, 1, 0) - 3699111 * cs(2, 0, -1, 0) - 2955968 * cs(2, 0, 0, 0) - 569925 * cs(0, 0, 2, 0);
+    const lam = d(Lp + sl / 1e6);
+    const bet = d(sb / 1e6);
+    const dist = 385000.56 + sr / 1000;
+    const eps = d(23.439291 - 0.0130042 * T);
+    const ra = Math.atan2(Math.sin(lam) * Math.cos(eps) - Math.tan(bet) * Math.sin(eps), Math.cos(lam));
+    const dec = Math.asin(clamp(Math.sin(bet) * Math.cos(eps) + Math.cos(bet) * Math.sin(eps) * Math.sin(lam), -1, 1));
+    const gmst = mod(280.46061837 + 360.98564736629 * (jd - 2451545), 360);
+    const H = d(gmst + lon) - ra;
+    const la = lat * D2R;
+    const alt = Math.asin(clamp(Math.sin(la) * Math.sin(dec) + Math.cos(la) * Math.cos(dec) * Math.cos(H), -1, 1)) * R2D;
+    const par = Math.asin(6378.14 / dist) * R2D;
+    // phase: illuminated fraction from the elongation, waxing when the moon is east of the sun
+    const sunLon = mod(280.46646 + 36000.76983 * T + 1.9146 * Math.sin(d(Ms)), 360);
+    const elong = mod(lam * R2D - sunLon, 360);
+    return { el: alt - par * Math.cos(alt * D2R) + 0.0, k: (1 - Math.cos(d(elong))) / 2, waxing: elong < 180 };
+  }
+
+  function scanMoon(startMs, lat, lon) {
+    const out = new Float32Array(145);
+    for (let i = 0; i <= 144; i++) out[i] = moonPos(startMs + i * 600000, lat, lon).el;
+    return out;
+  }
+
   function events(el) {
     const cross = (th, dir) => {
       for (let i = 1; i <= 1440; i++) {
@@ -197,7 +244,7 @@
 
   const BASE_CSS = `
     :host { display:block; }
-    ha-card { overflow:hidden; background:var(--sc-bg); color:var(--sc-fg); }
+    ha-card { overflow:hidden; background:var(--sc-bg); color:var(--sc-fg); --sc-moon:var(--sdc-moon, #9fb0ff); }
     .sc { font-size:calc(1rem * var(--sc-fs, 1)); padding:1em 1.1em .9em; }
     .hd { display:flex; align-items:center; gap:.75em; margin:-1em -1.1em .9em; padding:.9em 1.1em; }
     ha-card.fit { height:100%; }
@@ -257,6 +304,10 @@
     .s-sun { fill:var(--sc-sun); }
     .s-sun.dim { opacity:.55; }
     .s-halo { fill:var(--sc-sun); opacity:.22; }
+    .s-mo { fill:none; stroke:var(--sc-moon); stroke-width:1.4; stroke-dasharray:5 4; opacity:.85; }
+    .s-moon-bg { fill:var(--sc-moon); opacity:.28; }
+    .s-moon-lit { fill:var(--sc-moon); }
+    .mdim { opacity:.6; }
     .s-ax { fill:var(--sc-dim); font-size:.72em; }
     .s-wl { fill:var(--sc-dim); font-size:.68em; }
     @media (max-width:420px) { .big { font-size:1.6em; } }
@@ -386,7 +437,7 @@
         return v === undefined || v === null || v === '' || !Number.isFinite(n) ? null : clamp(n, lo, hi);
       };
       const COLOR_VARS = { background: 'bg', text: 'fg', text_secondary: 'dim', surface: 'surface', line: 'line',
-        day: 'day', night: 'night', curve: 'curve', sun: 'sun', gold: 'gold', accent: 'accent' };
+        day: 'day', night: 'night', curve: 'curve', sun: 'sun', moon: 'moon', gold: 'gold', accent: 'accent' };
       const fontScale = numOpt(config.font_scale, 0.5, 3) || 1;
       let vars = `--sc-fs:${fontScale};`;
       if (config.colors !== undefined) {
@@ -417,6 +468,7 @@
         chart_height: numOpt(config.chart_height, 80, 800),
         arrays_chart_height: numOpt(config.arrays_chart_height, 80, 600),
         sun_size: numOpt(config.sun_size, 4, 40),
+        moon: config.moon !== false,
         fit: config.fit === true,
         show,
       };
@@ -603,7 +655,7 @@
         const ev = events(today.el);
         const yev = events(yest.el);
         this._day = {
-          key, el: today.el, az: today.az, ev,
+          key, el: today.el, az: today.az, ev, moon: scanMoon(start, lat, lon),
           len: ev.sunrise !== null && ev.sunset !== null ? ev.sunset - ev.sunrise : null,
           ylen: yev.sunrise !== null && yev.sunset !== null ? yev.sunset - yev.sunrise : null,
         };
@@ -613,6 +665,7 @@
       const comp = solarPos(now.getTime(), lat, lon);
       const attrEl = st ? parseFloat(st.attributes && st.attributes.elevation) : NaN;
       const attrAz = st ? parseFloat(st.attributes && st.attributes.azimuth) : NaN;
+      const moonNow = moonPos(now.getTime(), lat, lon);
       const elev = Number.isFinite(attrEl) ? attrEl : comp.el;
       const az = Number.isFinite(attrAz) ? attrAz : comp.az;
 
@@ -624,18 +677,18 @@
       const tiles = cfg.tiles.map((t) => ({ t, st: h.states[t.entity] }));
 
       const sig = [
-        Math.floor(tp.min), elev.toFixed(1), az.toFixed(0), key, this._h12(), this._cw, this._chh,
+        Math.floor(tp.min), elev.toFixed(1), moonNow.el.toFixed(1), az.toFixed(0), key, this._h12(), this._cw, this._chh,
         arrs.map((x) => `${x.w}|${x.energy}`).join(','),
         tiles.map((x) => (x.st ? x.st.state : '')).join(','),
       ].join('#');
       if (sig === this._sig) return;
       this._sig = sig;
-      this._root.innerHTML = this._render({ cfg, day, nowMin: tp.min, elev, az, arrs, tiles });
+      this._root.innerHTML = this._render({ cfg, day, nowMin: tp.min, elev, az, arrs, tiles, moonNow });
     }
 
     /* --- rendering --- */
 
-    _chart(day, nowMin, elev, adv) {
+    _chart(day, nowMin, elev, adv, moonNow) {
       const { W, H } = this._dims(adv);
       const fs = Math.max(1, this._config.font_scale);
       const r = this._sunR(W, adv);
@@ -643,10 +696,12 @@
       const top = Math.max(r + 6, Math.round((adv ? 18 : 24) * fs));
       const bot = H - Math.round((adv ? 22 : 8) * (adv ? fs : 1));
       const X = (m) => px + (m / 1440) * (W - 2 * px);
-      const peak = Math.max(day.ev.peak, 3);
-      const yMax = peak * 1.12;
-      const yMin = Math.max(day.ev.min, -Math.max(12, peak * 0.6));
-      const Y = (e) => top + ((yMax - clamp(e, yMin, yMax)) / (yMax - yMin)) * (bot - top);
+      // One fixed, symmetric scale (the horizon is the middle line) so the curve is the whole day and night,
+      // and a higher sun or moon always draws taller. A gentle power curve stops a low winter sun being flat.
+      const R = Math.min(90, Math.max(70, day.ev.peak * 1.1, -day.ev.min * 1.1));
+      const mid = (top + bot) / 2;
+      const half = (bot - top) / 2;
+      const Y = (e) => mid - Math.sign(e) * Math.pow(Math.min(Math.abs(e) / R, 1), 0.72) * half;
       const y0 = Y(0);
       const f1 = (n) => n.toFixed(1);
       const pts = [];
@@ -675,6 +730,22 @@
         });
         mk.push(`<line class="s-mk d" x1="${f1(X(ev.noon))}" x2="${f1(X(ev.noon))}" y1="${f1(Y(ev.peak))}" y2="${bot}"/>`);
       }
+      let moonSvg = '';
+      if (this._config.moon !== false && day.moon) {
+        const X2 = (i) => X(i * 10);
+        const mline = 'M' + Array.from(day.moon, (e, i) => `${f1(X2(i))},${f1(Y(e))}`).join('L');
+        const mx = nowX;
+        const my = Y(moonNow.el);
+        const mr = Math.max(6, r * 0.9);
+        const k = moonNow.k;
+        const rx = Math.abs(1 - 2 * k) * mr;
+        const sweepA = moonNow.waxing ? 1 : 0;
+        const sweepB = (k < 0.5) === moonNow.waxing ? 1 : 0;
+        const lit = `M${f1(mx)},${f1(my - mr)}A${f1(mr)},${f1(mr)} 0 0 ${sweepA} ${f1(mx)},${f1(my + mr)}A${f1(rx)},${f1(mr)} 0 0 ${sweepB} ${f1(mx)},${f1(my - mr)}Z`;
+        moonSvg = `<path class="s-mo" d="${mline}"/>
+          <g class="${moonNow.el < 0 ? 'mdim' : ''}"><circle class="s-moon-bg" cx="${f1(mx)}" cy="${f1(my)}" r="${f1(mr)}"/>
+          <path class="s-moon-lit" d="${lit}"/></g>`;
+      }
       const dim = elev < -0.833 ? ' dim' : '';
       let axis = '';
       if (adv) {
@@ -694,6 +765,7 @@
           ${mk.join('')}
           <line class="s-hz" x1="${px}" x2="${W - px}" y1="${f1(y0)}" y2="${f1(y0)}"/>
           <path class="s-crv" d="${line}"/>
+          ${moonSvg}
           ${gold ? `<path class="s-gold" d="${gold}"/>` : ''}
           ${adv ? `<line class="s-now" x1="${f1(nowX)}" x2="${f1(nowX)}" y1="${top}" y2="${bot}"/>` : ''}
           <circle class="s-halo" cx="${f1(nowX)}" cy="${f1(Y(elev))}" r="${r + 5}"/>
@@ -742,7 +814,7 @@
         </svg>`;
     }
 
-    _render({ cfg, day, nowMin, elev, az, arrs, tiles }) {
+    _render({ cfg, day, nowMin, elev, az, arrs, tiles, moonNow }) {
       const L = cfg.labels;
       const h12 = this._h12();
       const hm = (m) => this._hm(m, h12);
@@ -780,7 +852,7 @@
             <div><div class="lbl">${esc(L.sunrise)}</div><div class="big">${hm(ev.sunrise)}</div></div>
             <div class="r"><div class="lbl">${esc(L.sunset)}</div><div class="big">${hm(ev.sunset)}</div></div>
           </div>
-          <div class="chw main"${sunEntity}>${this._chart(day, nowMin, elev, false)}</div>
+          <div class="chw main"${sunEntity}>${this._chart(day, nowMin, elev, false, moonNow)}</div>
           <div class="bottom">
             <div><div class="lbl">${esc(L.dawn)}</div><div class="v">${hm(ev.dawn)}</div></div>
             <div><div class="lbl">${esc(L.noon)}</div><div class="v">${hm(ev.noon)}</div></div>
@@ -803,7 +875,7 @@
           <div class="c"><div class="lbl">${esc(L.daylight)}</div><div class="big">${this._dur(day.len)}</div>${delta}</div>
           <div class="r"><div class="lbl">${esc(L.sunset)}</div><div class="big">${hm(ev.sunset)}</div></div>
         </div>
-        <div class="chw main"${sunEntity}>${this._chart(day, nowMin, elev, true)}</div>`;
+        <div class="chw main"${sunEntity}>${this._chart(day, nowMin, elev, true, moonNow)}</div>`;
 
       if (cfg.sections.stats) {
         const dir = COMPASS[Math.round(az / 22.5) % 16];
