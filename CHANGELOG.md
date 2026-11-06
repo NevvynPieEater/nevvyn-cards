@@ -2,6 +2,11 @@
 
 ## 1.1.0
 
+- Packaging: the three cards are now built into one file, `dist/nevvyn-cards.js` (sources in `src/`, built by
+  `node scripts/build.mjs`). The Marketplace and HACS only download the file named in `hacs.json`, so the
+  separate card files and the loader never reached the install. One file also means one versioned URL, so an
+  update refreshes all three cards at once.
+
 - `sun-day-card.js` 1.3.0: the chart now draws the whole day and night as one curve on a fixed, symmetric
   scale (the horizon is the middle line), so a higher sun is always taller and a low winter sun is no longer
   a flat line with a bump.

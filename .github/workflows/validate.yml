@@ -24,9 +24,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Check every file in dist as an ES module
+      - name: Check every source file and the bundle as an ES module
         run: |
-          for f in dist/*.js; do
+          for f in src/*.js dist/*.js; do
             cp "$f" "$RUNNER_TEMP/check.mjs"
             node --check "$RUNNER_TEMP/check.mjs" && echo "ok  $f"
           done
+      - name: The committed bundle must match src
+        run: |
+          node scripts/build.mjs
+          git diff --exit-code dist/nevvyn-cards.js

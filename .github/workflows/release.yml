@@ -1,7 +1,7 @@
 name: Release
 
 # Push a tag like v1.0.1 to publish a release. The Marketplace reads the files from the latest
-# release first, so every file in dist must be attached.
+# release first, and it only downloads the file named in hacs.json, so the one bundled file is attached.
 on:
   push:
     tags:
@@ -18,17 +18,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Syntax check
+      - name: Build and syntax check
         run: |
-          for f in dist/*.js; do
-            cp "$f" "$RUNNER_TEMP/check.mjs"
-            node --check "$RUNNER_TEMP/check.mjs"
-          done
+          node scripts/build.mjs
+          cp dist/nevvyn-cards.js "$RUNNER_TEMP/check.mjs"
+          node --check "$RUNNER_TEMP/check.mjs"
       - uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: |
-            dist/nevvyn-cards.js
-            dist/control-panel-card.js
-            dist/victron-ess-card.js
-            dist/sun-day-card.js
+          files: dist/nevvyn-cards.js

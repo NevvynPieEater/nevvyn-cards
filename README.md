@@ -29,12 +29,12 @@ Same custom repository, category **Dashboard**.
 
 ### Manual
 
-Copy everything in `dist/` to `/config/www/community/nevvyn-cards/`, then add the resource
-`/local/community/nevvyn-cards/nevvyn-cards.js` as a **JavaScript Module**. Only the loader is registered; it loads the three cards.
+Copy `dist/nevvyn-cards.js` to `/config/www/community/nevvyn-cards/`, then add the resource
+`/local/community/nevvyn-cards/nevvyn-cards.js?v=1.1.0` as a **JavaScript Module**. Change the `?v=` value each time you replace the file so browsers fetch the new copy.
 
 ## Updates and caching
 
-`nevvyn-cards.js` is a small loader. It passes the Marketplace's version parameter (`?v=...`) on to each card file, so one update refreshes all of them at once and nobody waits for a cache to expire. For manually copied files it checks each file's `Last-Modified` time on every page load, so replacing a file is enough.
+All three cards live in one file, `nevvyn-cards.js`. The Marketplace puts a version in that file's resource URL (`?v=...`), so an update makes browsers fetch the new copy straight away, with no cache clearing. The sources are in `src/`; run `node scripts/build.mjs` to rebuild the bundle.
 
 ## Migrating from the manual files
 
@@ -100,7 +100,7 @@ The card also reads `--sdc-*` CSS variables (for example `--sdc-day`, `--sdc-sun
 
 ## Releasing
 
-Tag a version (`git tag v1.0.1 && git push --tags`). The release workflow attaches every file in `dist/`, which is where the Marketplace reads them from.
+Edit the files in `src/`, run `node scripts/build.mjs`, commit, then tag a version (`git tag v1.0.1 && git push --tags`). The release workflow attaches `dist/nevvyn-cards.js`, which is what the Marketplace installs.
 
 ## Support
 
