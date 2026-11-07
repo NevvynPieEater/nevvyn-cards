@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.0
+
+- New `lcars-data-field` card: a decorative LCARS number cascade for wall displays. Built once, flicker is pure CSS, optional single-timer refresh. Config: `rows`, `pattern`, `refresh_seconds`, `flicker`, `line_height`.
+
 ## 1.4.0
 
 - Packaging: the three cards are now built into one file, `dist/nevvyn-cards.js` (sources in `src/`, built by
