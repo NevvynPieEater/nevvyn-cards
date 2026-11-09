@@ -3437,6 +3437,9 @@ try {
  *   image: /local/xbox.png               # your own picture instead of the built-in graphic: a URL, or a
  *                                        # media upload, e.g. media-source://media_source/local/xbox.png
  *   image_size: 150                      # picture height in px (default 150, width follows)
+ *   image_transparent: true              # make the picture's plain backdrop (sampled from its top-left pixel) transparent,
+ *                                        # so the glowing hexagon shows behind it
+ *   image_vibrance: 1.35                 # colour boost used with image_transparent (1 = unchanged)
  *   console: media_player.xbox           # console entity, shown as a chip
  *   in_use: binary_sensor.xbox_in_use    # on = the glow animates (falls back to `console` being on)
  *   chips:                               # extra chips
@@ -3470,6 +3473,9 @@ const XHC_CSS = `
 .hero svg{width:150px;height:150px}
 .hero img.art{max-width:100%;object-fit:contain;display:block;margin:0 auto;filter:drop-shadow(0 0 14px var(--glow))}
 .hero img.art.off{opacity:.55;filter:grayscale(.6)}
+.stack{display:grid;place-items:center}
+.stack>*{grid-area:1/1}
+.stack img.art{position:relative}
 .title{font-size:22px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;margin:0}
 .sub{color:var(--mute);font-size:13px;margin:2px 0 10px}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
@@ -3520,7 +3526,7 @@ class XboxHubCard extends HTMLElement {
     if (this._cfg.style === 'dark' || this._cfg.style === 'light') this.setAttribute('data-style', this._cfg.style);
     else this.removeAttribute('data-style');
     this._sig = '';
-    this._imgUrl = null; this._imgFor = null;
+    this._imgUrl = null; this._imgFor = null; this._procFor = null; this._procUrl = null;
     if (this._hass) this.hass = this._hass;
   }
 
@@ -3584,9 +3590,55 @@ class XboxHubCard extends HTMLElement {
     const img = raw && String(raw).startsWith('media-source://') ? this._imgUrl : raw;
     if (img) {
       const h = Number(this._cfg.image_size) || 150;
+      if (this._cfg.image_transparent) {
+        this._processImage(img);
+        const src = this._procUrl || img;
+        const ready = !!this._procUrl;
+        return `<div class="stack" style="height:${h}px;min-width:${Math.round(h * 1.1)}px">${this._svg(on, Math.round(h * 1.1))}${ready ? `<img class="art ${on ? '' : 'off'}" src="${src}" alt="" style="height:${h}px">` : ''}</div>`;
+      }
       return `<img class="art ${on ? '' : 'off'}" src="${this._esc(img)}" alt="" style="height:${h}px">`;
     }
-    return `<svg viewBox="0 0 200 200" role="img" aria-label="Crystal green emitter">
+    return this._svg(on, 150);
+  }
+
+  // Keys the picture's backdrop out (colour sampled from the top-left pixel) and lifts the colour, once per picture.
+  _processImage(src) {
+    if (this._procFor === src) return;
+    this._procFor = src; this._procUrl = null;
+    const im = new Image();
+    im.onload = () => {
+      try {
+        const w = im.naturalWidth, h = im.naturalHeight;
+        const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+        const cx = cv.getContext('2d', { willReadFrequently: true });
+        cx.drawImage(im, 0, 0);
+        const data = cx.getImageData(0, 0, w, h); const p = data.data;
+        const br = p[0], bg = p[1], bb = p[2];
+        const lo = Number(this._cfg.image_key_low) || 14, hi = Number(this._cfg.image_key_high) || 48;
+        const vib = this._cfg.image_vibrance != null ? Number(this._cfg.image_vibrance) : 1.35;
+        const cl = (v) => (v < 0 ? 0 : v > 255 ? 255 : v);
+        for (let i = 0; i < p.length; i += 4) {
+          const dr = p[i] - br, dg = p[i + 1] - bg, db = p[i + 2] - bb;
+          const d = Math.sqrt(dr * dr + dg * dg + db * db);
+          const a = d <= lo ? 0 : d >= hi ? 1 : (d - lo) / (hi - lo);
+          let r = p[i], g = p[i + 1], b = p[i + 2];
+          if (a > 0 && a < 1) { r = (r - br * (1 - a)) / a; g = (g - bg * (1 - a)) / a; b = (b - bb * (1 - a)) / a; }
+          const gray = (r + g + b) / 3;
+          p[i] = cl(gray + (r - gray) * vib); p[i + 1] = cl(gray + (g - gray) * vib); p[i + 2] = cl(gray + (b - gray) * vib);
+          p[i + 3] = Math.round(a * 255);
+        }
+        cx.putImageData(data, 0, 0);
+        this._procUrl = cv.toDataURL('image/png');
+        this._sig = '';
+        if (this._hass) this._render();
+      } catch (e) { this._procFor = null; }
+    };
+    im.onerror = () => { this._procFor = null; };
+    im.src = src;
+  }
+
+  _svg(on, size) {
+    return `<svg viewBox="0 0 200 200" style="width:${size}px;height:${size}px" role="img" aria-label="Crystal green emitter">
       <defs>
         <radialGradient id="xg" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#d8ffc0"/><stop offset=".45" stop-color="#3fd13f"/><stop offset="1" stop-color="#0a5a0a" stop-opacity="0"/></radialGradient>
         <linearGradient id="xf1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9bf05b"/><stop offset="1" stop-color="#107c10"/></linearGradient>
