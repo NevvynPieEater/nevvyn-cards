@@ -3434,7 +3434,8 @@ try {
  *   title: Xbox                          # heading
  *   subtitle: Lounge console             # line under the heading
  *   style: auto                          # auto (follows the device) | dark | light
- *   image: /local/xbox.png               # your own picture instead of the built-in graphic (any URL)
+ *   image: /local/xbox.png               # your own picture instead of the built-in graphic: a URL, or a
+ *                                        # media upload, e.g. media-source://media_source/local/xbox.png
  *   image_size: 150                      # picture height in px (default 150, width follows)
  *   console: media_player.xbox           # console entity, shown as a chip
  *   in_use: binary_sensor.xbox_in_use    # on = the glow animates (falls back to `console` being on)
@@ -3519,8 +3520,25 @@ class XboxHubCard extends HTMLElement {
     if (this._cfg.style === 'dark' || this._cfg.style === 'light') this.setAttribute('data-style', this._cfg.style);
     else this.removeAttribute('data-style');
     this._sig = '';
+    this._imgUrl = null; this._imgFor = null;
     if (this._hass) this.hass = this._hass;
   }
+
+  // media-source:// pictures (Home Assistant media uploads) need a signed URL; resolve it, and renew it before it expires.
+  _resolveImage() {
+    const img = this._cfg && this._cfg.image;
+    if (!img || !String(img).startsWith('media-source://') || !this._hass || this._imgFor === img) return;
+    this._imgFor = img;
+    this._hass.callWS({ type: 'media_source/resolve_media', media_content_id: img, expires: 3600 }).then((r) => {
+      this._imgUrl = r && r.url ? r.url : null;
+      this._sig = '';
+      if (this._hass) this.hass = this._hass;
+      clearTimeout(this._imgTimer);
+      this._imgTimer = setTimeout(() => { this._imgFor = null; this._resolveImage(); }, 50 * 60 * 1000);
+    }).catch(() => { this._imgFor = null; });
+  }
+
+  disconnectedCallback() { clearTimeout(this._imgTimer); this._imgFor = null; }
 
   getCardSize() { return 12; }
   getGridOptions() { return { columns: 'full', min_columns: 6 }; }
@@ -3528,6 +3546,7 @@ class XboxHubCard extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     if (!this._cfg) return;
+    this._resolveImage();
     const sig = this._signature();
     if (sig !== this._sig) { this._sig = sig; this._render(); }
   }
@@ -3561,7 +3580,8 @@ class XboxHubCard extends HTMLElement {
   }
 
   _art(on) {
-    const img = this._cfg.image;
+    const raw = this._cfg.image;
+    const img = raw && String(raw).startsWith('media-source://') ? this._imgUrl : raw;
     if (img) {
       const h = Number(this._cfg.image_size) || 150;
       return `<img class="art ${on ? '' : 'off'}" src="${this._esc(img)}" alt="" style="height:${h}px">`;
