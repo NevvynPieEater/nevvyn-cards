@@ -8,6 +8,7 @@ Three Lovelace cards for Home Assistant in one install, each in three looks: **d
 |---|---|---|
 | Control panel | `custom:control-panel-card` | A tidy settings list: toggles, sliders, selects, times, buttons and read-only values, each with a short label and a "?" for the longer description. |
 | Victron ESS | `custom:victron-ess-card` | Animated power flow and controls for a Victron ESS system. |
+| Xbox hub | `custom:xbox-hub-card` | Xbox console status, player gamerpics with presence and status, storage, playtime and quick controls, with an original crystal-green graphic. |
 | Sun | `custom:sun-day-card` | Sunrise, sunset, dawn, dusk and a live sun position on a day curve. The advanced variant adds daylight length, golden hour and your solar arrays' potential against actual output. |
 
 Requires **Home Assistant 2026.11 or newer** (Marketplace). HACS also works on older versions.
@@ -30,7 +31,7 @@ Same custom repository, category **Dashboard**.
 ### Manual
 
 Copy `dist/nevvyn-cards.js` to `/config/www/community/nevvyn-cards/`, then add the resource
-`/local/community/nevvyn-cards/nevvyn-cards.js?v=1.4.0` as a **JavaScript Module**. Change the `?v=` value each time you replace the file so browsers fetch the new copy.
+`/local/community/nevvyn-cards/nevvyn-cards.js?v=1.6.0` as a **JavaScript Module**. Change the `?v=` value each time you replace the file so browsers fetch the new copy.
 
 ## Updates and caching
 

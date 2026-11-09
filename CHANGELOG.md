@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.0
+
+- New `xbox-hub-card`: Xbox console status with an original crystal-green emitter graphic (glows while the console is in use), player gamerpics with presence and status, storage bars, playtime, and optional script buttons, toggle and slider. Gamerpics come from the Xbox presence sensors' `entity_picture`. Follows the device's light/dark setting, or force it with `style: dark` or `style: light`. Set `image` (and optionally `image_size`) to show your own picture in place of the built-in graphic. Everything is configured by entity, so it works with any Xbox integration setup.
+
 ## 1.5.0
 
 - New `lcars-data-field` card: a decorative LCARS number cascade for wall displays. Built once, flicker is pure CSS, optional single-timer refresh. Config: `rows`, `pattern`, `refresh_seconds`, `flicker`, `line_height`.
