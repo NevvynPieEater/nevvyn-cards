@@ -1,5 +1,5 @@
 /**
- * control-panel-card.js  v2.1.0  (formerly toggle-info-card.js)
+ * control-panel-card.js  v2.2.0  (formerly toggle-info-card.js)
  *
  * A Lovelace card that lists settings (toggles, sliders, selects, times, buttons, read-only values) with
  * a one-line brief for each and a round "?" button. Tapping the "?" opens a
@@ -47,11 +47,24 @@
  *       button_label: Calculate
  *     - entity: sensor.gx_device_dc_battery_charge         # read-only value (sensor / binary_sensor / anything else)
  *
+ * Hold-until-Apply (fail-safe for settings that cost money if fat-fingered, e.g. the overnight charge target):
+ *     - entity: input_number.ess_overnight_target_soc
+ *       apply: true             # changes are only queued; an Apply bar appears under the row with
+ *                               #   "Not applied: 100 % -> 50 %", Cancel and Apply. Nothing is sent to Home
+ *                               #   Assistant until Apply is pressed (twice by default, see confirm).
+ *       # or options:
+ *       apply: { confirm: double_tap, timeout: 120, label: Apply }
+ *                               #   confirm: double_tap (default, 2nd press within 4 s) | tap
+ *                               #   timeout: seconds before an unapplied change is dropped (default 120, 0 = never)
+ *   Put `apply:` at the top level of the card (true or the options map) to hold every toggle, slider, select
+ *   and time row; a row can then opt out with `apply: false`. Buttons and read-only values are never held.
+ *   The same Apply bar shows in the "?" dialog.
+ *
  * Type is picked from the entity domain; force it with  type: toggle | slider | select | time | button | sensor
  * `invert` also works on a binary_sensor shown as a read-only indicator.
  */
 (() => {
-  const VERSION = '2.1.0';
+  const VERSION = '2.2.0';
   if (customElements.get('control-panel-card')) return;
 
   /* ---------- tiny helpers ---------- */
@@ -127,6 +140,23 @@
     }
     .rounded .act { border-radius: 18px; }
     .act:disabled, .sel:disabled { opacity: .4; cursor: default; }
+
+    .row[data-apply="1"] { flex-wrap: wrap; }
+    .row[data-pending="1"] { border-left-color: var(--warning-color, #ffa000); }
+    .apbar {
+      display: none; flex: 1 1 100%; order: 10; box-sizing: border-box; align-items: center; flex-wrap: wrap;
+      gap: 8px 10px; padding: 0 14px 10px 20px;
+    }
+    .apbar.show { display: flex; }
+    .apbar .aptxt { flex: 1 1 150px; font-size: 0.85rem; color: var(--secondary-text-color); overflow-wrap: anywhere; }
+    .apbar .aptxt b { color: var(--primary-text-color); font-weight: 600; }
+    .apb {
+      font: inherit; font-size: 0.85rem; padding: 8px 14px; cursor: pointer;
+      background: none; border: 1px solid var(--tic-off); color: var(--primary-text-color);
+    }
+    .apb.go { background: var(--tic-accent); border-color: var(--tic-accent); color: #fff; }
+    .apb.go.armed { background: var(--warning-color, #ffa000); border-color: var(--warning-color, #ffa000); color: #000; }
+    .rounded .apb { border-radius: 18px; }
   `;
 
   const DARK_CTL = `
@@ -139,6 +169,12 @@
     .dark .sel { background: #0b1526; color: #eaf2ff; border-color: rgba(255,255,255,.25); color-scheme: dark; }
     .dark .act { border-color: #0d8bff; color: #7cc4ff; background: rgba(13,139,255,.12); }
     .dark .dctl { padding-top: 12px; }
+    .dark .apbar .aptxt { color: #9db8dd; }
+    .dark .apbar .aptxt b { color: #fff; }
+    .dark .apb { color: #cfe1f7; border-color: rgba(255,255,255,.25); }
+    .dark .apb.go { background: linear-gradient(135deg, #0d8bff, #0055b3); border-color: transparent; color: #fff; }
+    .dark .apb.go.armed { background: #ffb020; color: #1b1200; }
+    .dark .row[data-pending="1"] { border-left-color: #ffb020; }
   `;
 
   const LCARS_CTL = `
@@ -159,6 +195,13 @@
     }
     .lcars .row .ctl.slider { padding: 2px 14px 12px 94px; }
     .lcars .dctl { padding: 6px 14px 10px 22px; }
+    .lcars .row .apbar { padding: 2px 14px 12px 94px; }
+    .lcars .apbar .aptxt { color: var(--lc-p); letter-spacing: .08em; }
+    .lcars .apbar .aptxt b { color: var(--lc-t); font-weight: 400; }
+    .lcars .apb { border: 0; background: var(--lc-v); color: #000; border-radius: 999px; letter-spacing: .1em; text-transform: uppercase; padding: 8px 18px; }
+    .lcars .apb.go { background: var(--lc-o); }
+    .lcars .apb.go.armed { background: var(--lc-t); }
+    .lcars .row[data-pending="1"] { --blk: var(--lc-t); }
   `;
 
   /* ---------- styles ---------- */
@@ -291,6 +334,7 @@
     .rounded .more { border-radius: 18px; }
     button:focus-visible { outline: 2px solid var(--tic-accent); outline-offset: 2px; }
     .dctl { display: flex; padding: 4px 20px 8px; }
+    .dialog .apbar { padding: 0 20px 8px; }
     .dctl .ctl { flex: 1 1 auto; }
     ${CONTROL_CSS}
   `;
@@ -540,6 +584,21 @@
         }
         item._type = item.type || resolveType(item.entity);
         item.invert = item.invert === true || item.invert === 'true';
+        item._apply = null;
+        const wanted = item.apply !== undefined ? item.apply : config.apply;
+        if (wanted && ['toggle', 'slider', 'select', 'time'].includes(item._type)) {
+          const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
+          const a = { ...obj(config.apply), ...obj(item.apply) };
+          const confirm = a.confirm === undefined ? 'double_tap' : a.confirm;
+          if (!['double_tap', 'tap'].includes(confirm)) {
+            throw new Error(`control-panel-card: toggles[${i}] apply.confirm must be double_tap or tap`);
+          }
+          const timeout = a.timeout === undefined ? 120 : Number(a.timeout);
+          if (!Number.isFinite(timeout) || timeout < 0) {
+            throw new Error(`control-panel-card: toggles[${i}] apply.timeout must be a number >= 0`);
+          }
+          item._apply = { confirm, timeout, label: a.label || null };
+        }
         return item;
       });
       // Older values still accepted: style "normal" = light; style "angular"/"rounded" = light + corners.
@@ -556,6 +615,12 @@
         ? (config.line_style === 'curved' ? 'rounded' : 'angular')
         : ((config.corners || legacyCorners || 'angular') === 'rounded' ? 'rounded' : 'angular');
       this._config = { ...config, style, corners, toggles };
+      Object.values(this._pendTimers || {}).forEach(clearTimeout);
+      Object.values(this._armTimers || {}).forEach(clearTimeout);
+      this._pend = {};
+      this._armed = {};
+      this._pendTimers = {};
+      this._armTimers = {};
       this._build();
       if (this._hass) this._update();
     }
@@ -636,10 +701,16 @@
           <button class="help" type="button" title="What does this do?"><span>?</span></button>`;
         const ctl = this._control(t);
         row.appendChild(ctl.el);
+        const bar = t._apply ? this._makeBar(t) : null;
+        if (bar) {
+          row.dataset.apply = '1';
+          row.appendChild(bar.el);
+        }
         const refs = {
           t,
           i,
           ctl,
+          bar,
           el: row,
           icon: row.querySelector('ha-icon'),
           name: row.querySelector('.name'),
@@ -677,7 +748,7 @@
         const sw = wrap.firstChild;
         sw.addEventListener('click', (ev) => {
           ev.stopPropagation();
-          this._toggle(entity);
+          this._toggleAction(t);
         });
         return {
           el: wrap,
@@ -706,8 +777,10 @@
           paint(parseFloat(rng.value));
         });
         rng.addEventListener('change', () => {
-          call('set_value', { value: parseFloat(rng.value) });
+          const v = parseFloat(rng.value);
+          const real = this._hass && this._hass.states[entity];
           dragging = false;
+          this._stage(t, String(v), real ? String(parseFloat(real.state)) : '', (n) => `${n}${unit ? ' ' + unit : ''}`, () => call('set_value', { value: v }));
         });
         return {
           el: wrap,
@@ -736,7 +809,12 @@
         const sel = wrap.firstChild;
         let sig = null;
         sel.addEventListener('click', (ev) => ev.stopPropagation());
-        sel.addEventListener('change', () => call('select_option', { option: sel.value }));
+        sel.addEventListener('change', () => {
+          const o = sel.value;
+          const real = this._hass && this._hass.states[entity];
+          const labels = t.option_labels || {};
+          this._stage(t, o, real ? real.state : '', (n) => labels[n] || prettify(n), () => call('select_option', { option: o }));
+        });
         return {
           el: wrap,
           update: (s) => {
@@ -787,9 +865,15 @@
           ctrl.addEventListener('change', () => {
             const v = ctrl.value;
             if (!v) return;
-            if (m === 'time') call('set_datetime', { time: v + ':00' });
-            else if (m === 'date') call('set_datetime', { date: v });
-            else call('set_datetime', { datetime: v.replace('T', ' ') + ':00' });
+            const real = this._hass && this._hass.states[entity];
+            const rawNow = real ? real.state : '';
+            const shown = (n) => String(n).replace(/^(\d{2}:\d{2}):00$/, '$1').replace(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}):00$/, '$1');
+            if (m === 'time') this._stage(t, v + ':00', rawNow, shown, () => call('set_datetime', { time: v + ':00' }));
+            else if (m === 'date') this._stage(t, v, rawNow, shown, () => call('set_datetime', { date: v }));
+            else {
+              const dt = v.replace('T', ' ') + ':00';
+              this._stage(t, dt, rawNow, shown, () => call('set_datetime', { datetime: dt }));
+            }
           });
           wrap.appendChild(ctrl);
           mode = m;
@@ -876,7 +960,8 @@
     // still flips the real entity, only the picture and the words are reversed.
     _stateOf(t) {
       const st = this._hass && this._hass.states[t.entity];
-      const raw = st ? st.state : 'unavailable';
+      const pend = t._apply && this._pend ? this._pend[t.entity] : null;
+      const raw = pend ? pend.value : st ? st.state : 'unavailable'; // a change waiting for Apply is shown as if done
       const binary = t._type === 'toggle' || domainOf(t.entity) === 'binary_sensor';
       let state;
       let text;
@@ -892,7 +977,9 @@
       } else {
         state = 'info';
         text = raw;
-        if (typeof this._hass.formatEntityState === 'function') {
+        if (pend) {
+          text = pend.fmt(raw);
+        } else if (typeof this._hass.formatEntityState === 'function') {
           try { text = this._hass.formatEntityState(st); } catch (e) { /* keep raw */ }
         } else if (st.attributes.unit_of_measurement) {
           text = `${raw} ${st.attributes.unit_of_measurement}`;
@@ -927,6 +1014,10 @@
         if (r.name.textContent !== s.name) r.name.textContent = s.name;
         if (r.icon.getAttribute('icon') !== s.icon) r.icon.setAttribute('icon', s.icon);
         r.ctl.update(s);
+        if (r.bar) {
+          r.bar.update();
+          r.el.dataset.pending = this._pend[r.t.entity] ? '1' : '';
+        }
         r.help.setAttribute('aria-label', `About ${s.name}`);
       });
       if (this._countEl) {
@@ -934,6 +1025,99 @@
         this._countEl.style.display = n ? '' : 'none';
       }
       this._updateDialog();
+    }
+
+    /* --- hold-until-Apply --- */
+
+    // Every change to a held row comes through here. Without `apply` it runs at once.
+    _stage(t, value, current, fmt, run) {
+      if (!t._apply) { run(); return; }
+      const key = t.entity;
+      clearTimeout(this._pendTimers[key]);
+      clearTimeout(this._armTimers[key]);
+      this._armed[key] = false;
+      if (String(value) === String(current)) delete this._pend[key];
+      else {
+        this._pend[key] = { value, from: current, fmt, run };
+        if (t._apply.timeout > 0) {
+          this._pendTimers[key] = setTimeout(() => this._cancelPending(key), t._apply.timeout * 1000);
+        }
+      }
+      this._update();
+    }
+
+    _cancelPending(key) {
+      clearTimeout(this._pendTimers[key]);
+      clearTimeout(this._armTimers[key]);
+      delete this._pend[key];
+      this._armed[key] = false;
+      this._update();
+    }
+
+    _applyPending(t) {
+      const key = t.entity;
+      const p = this._pend[key];
+      if (!p) return;
+      clearTimeout(this._pendTimers[key]);
+      clearTimeout(this._armTimers[key]);
+      delete this._pend[key];
+      this._armed[key] = false;
+      p.run();
+      this._haptic();
+      this._update();
+    }
+
+    _barAct(t, act) {
+      const key = t.entity;
+      if (act === 'cancel') { this._cancelPending(key); return; }
+      if (act !== 'apply') return;
+      if (t._apply.confirm === 'double_tap' && !this._armed[key]) {
+        this._armed[key] = true;
+        clearTimeout(this._armTimers[key]);
+        this._armTimers[key] = setTimeout(() => { this._armed[key] = false; this._update(); }, 4000);
+        this._update();
+        return;
+      }
+      this._applyPending(t);
+    }
+
+    // The "Not applied: 100 % -> 50 %  [Cancel] [Apply]" strip under a row (and in its "?" dialog).
+    _makeBar(t) {
+      const el = document.createElement('div');
+      el.className = 'apbar';
+      el.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const b = ev.target.closest('[data-act]');
+        if (b) this._barAct(t, b.dataset.act);
+      });
+      return {
+        el,
+        update: () => {
+          const p = this._pend[t.entity];
+          el.classList.toggle('show', !!p);
+          if (!p) { el._h = ''; if (el.innerHTML) el.innerHTML = ''; return; }
+          const armed = !!this._armed[t.entity];
+          const lc = this._config.style === 'lcars';
+          const html = `<span class="aptxt"><b>Not applied:</b> ${esc(p.fmt(p.from))} &rarr; <b>${esc(p.fmt(p.value))}</b></span>
+            <button class="apb" type="button" data-act="cancel">Cancel</button>
+            <button class="apb go${armed ? ' armed' : ''}" type="button" data-act="apply">${esc(armed ? (lc ? 'Engage!' : 'Tap again to apply') : t._apply.label || (lc ? 'Make it so.' : 'Apply'))}</button>`;
+          if (el._h !== html) { el._h = html; el.innerHTML = html; }
+        },
+      };
+    }
+
+    // Toggle switch: flips at once, or queues the flip when the row is held.
+    _toggleAction(t) {
+      const entity = t.entity;
+      const st = this._hass && this._hass.states[entity];
+      if (!st || (st.state !== 'on' && st.state !== 'off')) return;
+      if (!t._apply) { this._toggle(entity); return; }
+      const pend = this._pend[entity];
+      const want = (pend ? pend.value : st.state) === 'on' ? 'off' : 'on';
+      const fmt = (v) => ((v === 'on') !== !!t.invert ? t.on_label || 'On' : t.off_label || 'Off');
+      this._stage(t, want, st.state, fmt, () => {
+        this._hass.callService('homeassistant', want === 'on' ? 'turn_on' : 'turn_off', { entity_id: entity });
+      });
     }
 
     _haptic() {
@@ -988,9 +1172,14 @@
       });
       q('.close').addEventListener('click', () => this._closeDialog(true));
       let ctl = null;
+      let bar = null;
       if (t._type !== 'sensor') {
         ctl = this._control(t);
         q(showState ? '.dstate' : '.dctl').appendChild(ctl.el);
+        if (t._apply) {
+          bar = this._makeBar(t);
+          q('.dbody').before(bar.el);
+        }
       }
       q('.more').addEventListener('click', () => {
         this._closeDialog(false);
@@ -998,14 +1187,14 @@
       });
       document.body.appendChild(host);
       document.addEventListener('keydown', this._onKey, true);
-      this._dlg = { host, sh, t, trigger, ctl };
+      this._dlg = { host, sh, t, trigger, ctl, bar };
       this._updateDialog();
       q('.close').focus();
     }
 
     _updateDialog() {
       if (!this._dlg || !this._hass) return;
-      const { sh, t, ctl } = this._dlg;
+      const { sh, t, ctl, bar } = this._dlg;
       const s = this._stateOf(t);
       sh.querySelector('.dialog').dataset.state = s.state;
       sh.querySelector('ha-icon').setAttribute('icon', s.icon);
@@ -1013,6 +1202,7 @@
       const label = sh.querySelector('.label');
       if (label) label.textContent = s.text;
       if (ctl) ctl.update(s);
+      if (bar) bar.update();
     }
 
     _onKey(ev) {

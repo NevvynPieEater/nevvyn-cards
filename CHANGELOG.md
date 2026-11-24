@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.6.0
+
+- Hold-until-Apply fail-safe, so one stray tap cannot change something that costs money (for example the
+  overnight charge target dropping to 50 %). Opt in with `apply`; the default is unchanged.
+- `victron-ess-card`: `apply: true` queues every change (charge current, extra sliders, ESS mode, MultiPlus
+  mode, Automations switch) and shows one footer listing them ("Target 100 % -> 50 %") with Cancel and Apply.
+  Apply needs a second tap within 4 s (`confirm: tap` for one), unapplied changes are dropped after 120 s
+  (`timeout`), `include:` picks which controls are held and an extra slider can opt out with `apply: false`.
+- `control-panel-card` 2.2.0: `apply` per row (or card-wide) puts a "Not applied" bar with Cancel and Apply under
+  the row, and in its "?" dialog. Applies to toggles, sliders, selects and time rows.
+- LCARS style: the Apply button reads "Make it so." (and "Engage!" while armed). `label` overrides it.
+
 ## 1.5.0
 
 - New `lcars-data-field` card: a decorative LCARS number cascade for wall displays. Built once, flicker is pure CSS, optional single-timer refresh. Config: `rows`, `pattern`, `refresh_seconds`, `flicker`, `line_height`.

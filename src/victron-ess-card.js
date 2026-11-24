@@ -79,6 +79,20 @@
  *    min_entity: input_number.xxx          #   overrides min with this entity's state
  *    step: 1
  *    presets: [0, 10, 20, 30]              #   preset chips (only those inside min..max are shown)
+ *  extra_sliders:                          # optional: more sliders (input_number / number) under the charge slider
+ *    - entity: input_number.xxx
+ *      label: Overnight Charge Target
+ *      apply: false                        #   opt this one out of the Apply footer (see apply below)
+ *  apply: true                             # optional: hold every change until the Apply footer is pressed, so a
+ *                                          #   slip of the finger cannot change the overnight charge. Nothing is
+ *                                          #   written to Home Assistant until Apply. Or give options:
+ *  apply:
+ *    confirm: double_tap                   #   double_tap (default: the first press arms it, the second applies,
+ *                                          #   within 4 s) | tap (a single press applies)
+ *    timeout: 120                          #   seconds before unapplied changes are discarded (default 120, 0 = never)
+ *    label: Apply changes                  #   button text (default "Apply changes"; "Make it so." in the lcars style)
+ *    include: [charge_current, ess_mode, multiplus_mode, automations_toggle, extra_sliders]
+ *                                          #   which controls are held (default: all of them)
  *  thresholds:                             # optional (defaults below)
  *    soc_critical: 20                      #   SOC ring turns red below this
  *    soc_warning: 50                       #   ...amber below this, green above
@@ -122,6 +136,9 @@ const DEFAULT_THRESHOLDS = {
   flow_min_w: 5,
   charge_state_w: 20,
 };
+
+// Control groups that the optional Apply footer can hold back (config: apply.include).
+const APPLY_GROUPS = ['charge_current', 'ess_mode', 'multiplus_mode', 'automations_toggle', 'extra_sliders'];
 
 const DEFAULT_LABELS = {
   title: 'Victron ESS',
@@ -320,6 +337,26 @@ ha-card {
 .vc-switch .knob { position:absolute; top:2px; left:2px; width:18px; height:18px; border-radius:50%; background:#fff; transition: left .2s; box-shadow:0 1px 3px rgba(0,0,0,0.4); }
 .vc-switch.on .knob { left:18px; }
 
+/* hold-until-Apply: a change that has not been sent yet */
+.vc-seg-btn.pending { border:1px dashed #ffb020; }
+.vc-slider.pending::-webkit-slider-thumb { box-shadow:0 0 0 4px rgba(255,176,32,0.45); }
+.vc-slider.pending::-moz-range-thumb { box-shadow:0 0 0 4px rgba(255,176,32,0.45); }
+.vc-slider-value.pending { color:#ffb020; min-width:112px; }
+.vc-switch.pending { outline:2px dashed #ffb020; outline-offset:2px; }
+.vc-apply { display:none; margin:16px 16px 0 16px; padding:12px; border-radius:10px;
+  background:rgba(255,176,32,0.10); border:1px solid rgba(255,176,32,0.45); color:#ffe3b0; font-size:12.5px; }
+.vc-apply.show { display:block; }
+.vc-apply-title { font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; margin-bottom:6px; color:#ffb020; }
+.vc-apply-line { margin:2px 0; }
+.vc-apply-line b { color:#fff; }
+.vc-apply-actions { display:flex; gap:8px; margin-top:10px; }
+.vc-apply-btn { flex:1 1 0; text-align:center; cursor:pointer; user-select:none; padding:10px 6px; border-radius:10px; font-size:13px; font-weight:700;
+  background:rgba(255,255,255,0.08); color:#cfe1f7; border:1px solid rgba(255,255,255,0.12); }
+.vc-apply-btn.go { flex:2 1 0; background:linear-gradient(135deg,#0d8bff,#0055b3); color:#fff; border-color:transparent; }
+.vc-apply-btn.go.armed { background:linear-gradient(135deg,#ffb020,#d67f00); color:#1b1200; animation:vcArm .6s ease-in-out infinite alternate; }
+.vc-apply-btn:active { transform:scale(0.97); }
+@keyframes vcArm { from { opacity:1; } to { opacity:.7; } }
+
 /* config / missing-entity notices */
 .vc-notice {
   margin: 14px 16px 0 16px; padding: 10px 12px; border-radius: 10px;
@@ -430,6 +467,17 @@ ha-card.lcars {
 .lcars .vc-switch .knob { display:none; }
 
 .lcars .vc-notice { border-radius:0; letter-spacing:.02em; }
+
+.lcars .vc-seg-btn.pending { border-style:dashed; border-color:var(--lc-t); }
+.lcars .vc-slider-value.pending { color:var(--lc-t); }
+.lcars .vc-switch.pending { outline-color:var(--lc-t); }
+.lcars .vc-apply { margin:20px 14px 0 14px; background:#14101c; border:0; border-left:8px solid var(--lc-t); border-radius:0; color:var(--lc-p);
+  clip-path:polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 0 100%); text-transform:uppercase; letter-spacing:.1em; font-size:14px; }
+.lcars .vc-apply-title { color:var(--lc-t); font-size:14px; font-weight:400; letter-spacing:.14em; }
+.lcars .vc-apply-line b { color:var(--lc-t); font-weight:400; }
+.lcars .vc-apply-btn { background:#000; color:var(--lc-v); border:2px solid var(--lc-v); border-radius:999px; font-weight:400; font-size:15px; }
+.lcars .vc-apply-btn.go { background:var(--lc-o); border-color:var(--lc-o); color:#000; }
+.lcars .vc-apply-btn.go.armed { background:var(--lc-t); border-color:var(--lc-t); }
 `;
 
 // Light look, layered on top of STYLE when `style: light`. It uses your HA theme variables and the same
@@ -518,12 +566,25 @@ ha-card.light {
 .light .vc-switch { background:color-mix(in srgb, var(--vc-off) 60%, transparent); }
 .light .vc-switch.on { background:var(--vc-accent); }
 
+.light .vc-seg-btn.pending { border-left-color:var(--vc-warn); outline:1px dashed var(--vc-warn); outline-offset:-1px; }
+.light .vc-slider-value.pending { color:var(--vc-warn); }
+.light .vc-slider.pending::-webkit-slider-thumb { background:var(--vc-warn); box-shadow:0 0 0 4px color-mix(in srgb, var(--vc-warn) 30%, transparent); }
+.light .vc-slider.pending::-moz-range-thumb { background:var(--vc-warn); box-shadow:0 0 0 4px color-mix(in srgb, var(--vc-warn) 30%, transparent); }
+.light .vc-switch.pending { outline-color:var(--vc-warn); }
+.light .vc-apply { margin:16px 0 0 0; padding:10px 12px; background:color-mix(in srgb, var(--vc-warn) 14%, var(--vc-surface)); border:0;
+  border-left:6px solid var(--vc-warn); border-radius:0; color:var(--primary-text-color); }
+.light .vc-apply-title { color:var(--secondary-text-color); font-weight:500; }
+.light .vc-apply-line b { color:inherit; }
+.light .vc-apply-btn { background:transparent; color:var(--primary-text-color); border:1px solid var(--vc-line); border-radius:0; font-weight:500; }
+.light .vc-apply-btn.go { background:var(--vc-accent); color:#fff; border-color:var(--vc-accent); }
+.light .vc-apply-btn.go.armed { background:var(--vc-warn); border-color:var(--vc-warn); color:#000; }
+
 .light .vc-notice { margin:14px 0 0 0; background:color-mix(in srgb, var(--vc-bad) 12%, transparent); border-color:color-mix(in srgb, var(--vc-bad) 40%, transparent); color:var(--primary-text-color); }
 .light .vc-notice.warn { background:color-mix(in srgb, var(--vc-warn) 14%, transparent); border-color:color-mix(in srgb, var(--vc-warn) 45%, transparent); color:var(--primary-text-color); }
 .light .vc-notice b, .light .vc-notice code { color:inherit; }
 
 /* corner shape follows line_style: angular = cut corners, curved = rounded */
-${['.vc-stat', '.vc-footer-toggle', '.vc-seg-btn']
+${['.vc-stat', '.vc-footer-toggle', '.vc-seg-btn', '.vc-apply', '.vc-apply-btn']
   .map((s) => `ha-card.light.ls-angular ${s} { clip-path:${LIGHT_CUT}; }\nha-card.light.ls-curved ${s} { border-radius:12px; }`)
   .join('\n')}
 `;
@@ -613,6 +674,26 @@ class VictronEssCard extends HTMLElement {
       this._extra = config.extra_sliders;
     }
 
+    // apply: hold changes until the Apply footer is pressed (see header docs)
+    this._applyCfg = null;
+    if (config.apply) {
+      const a = config.apply === true ? {} : config.apply;
+      if (typeof a !== 'object' || Array.isArray(a)) throw new Error('victron-ess-card: "apply" must be true or a map of options');
+      const confirm = a.confirm === undefined ? 'double_tap' : a.confirm;
+      if (!['double_tap', 'tap'].includes(confirm)) throw new Error('victron-ess-card: apply.confirm must be double_tap or tap');
+      const timeout = a.timeout === undefined ? 120 : Number(a.timeout);
+      if (!Number.isFinite(timeout) || timeout < 0) throw new Error('victron-ess-card: apply.timeout must be a number >= 0');
+      const include = a.include === undefined ? APPLY_GROUPS : a.include;
+      if (!Array.isArray(include) || include.some((g) => !APPLY_GROUPS.includes(g))) {
+        throw new Error(`victron-ess-card: apply.include must be a list of ${APPLY_GROUPS.join(', ')}`);
+      }
+      this._applyCfg = { confirm, timeout, include, label: a.label || null };
+    }
+    clearTimeout(this._pendTimer);
+    clearTimeout(this._armTimer);
+    this._pending = {};
+    this._armed = false;
+
     const rawTheme = config.style === undefined ? 'dark' : config.style;
     const theme = rawTheme === 'normal' ? 'dark' : rawTheme; // "normal" was the original dark look
     if (!THEMES.includes(theme)) {
@@ -681,6 +762,80 @@ class VictronEssCard extends HTMLElement {
   _attr(id, key, fallback) { const s = this._st(id); return s && s.attributes && key in s.attributes ? s.attributes[key] : fallback; }
   _call(domain, service, data) { if (this._hass) this._hass.callService(domain, service, data); }
 
+  // ---- hold-until-Apply --------------------------------------------------
+  // Every control change goes through _change(). Without `apply` it runs at once (the old behaviour).
+  // With `apply` and a held group it is only queued in this._pending; nothing reaches Home Assistant
+  // until the Apply button is pressed (twice by default), so one stray tap cannot change the charge.
+  _held(group, x) {
+    return !!this._applyCfg && this._applyCfg.include.includes(group) && !(x && x.apply === false);
+  }
+
+  _change({ key, group, x, value, current, name, fmt, run }) {
+    if (!this._held(group, x)) { run(); return; }
+    if (value === current) delete this._pending[key];
+    else this._pending[key] = { value, from: current, name, fmt, run };
+    this._armed = false;
+    clearTimeout(this._armTimer);
+    clearTimeout(this._pendTimer);
+    if (Object.keys(this._pending).length && this._applyCfg.timeout > 0) {
+      this._pendTimer = setTimeout(() => this._discard(), this._applyCfg.timeout * 1000);
+    }
+    this._updateDynamic();
+  }
+
+  _pend(key) { return this._pending && this._pending[key]; }
+
+  _discard() {
+    clearTimeout(this._pendTimer);
+    clearTimeout(this._armTimer);
+    this._pending = {};
+    this._armed = false;
+    this._dragging = false;
+    this._xDrag = {};
+    if (this._built && !this._missingConfig.length) this._updateDynamic();
+  }
+
+  _applyPending() {
+    const items = Object.values(this._pending);
+    if (!items.length) return;
+    clearTimeout(this._pendTimer);
+    clearTimeout(this._armTimer);
+    this._pending = {};
+    this._armed = false;
+    items.forEach((it) => it.run());
+    this._updateDynamic();
+  }
+
+  _onApplyClick(act) {
+    if (act === 'cancel') { this._discard(); return; }
+    if (act !== 'apply') return;
+    if (this._applyCfg.confirm === 'double_tap' && !this._armed) {
+      this._armed = true;
+      clearTimeout(this._armTimer);
+      this._armTimer = setTimeout(() => { this._armed = false; this._renderApplyBar(); }, 4000);
+      this._renderApplyBar();
+      return;
+    }
+    this._applyPending();
+  }
+
+  _renderApplyBar() {
+    const host = this._root.querySelector('#applyBar');
+    if (!host) return;
+    const items = Object.values(this._pending || {});
+    host.classList.toggle('show', items.length > 0);
+    if (!items.length) { host._html = ''; if (host.innerHTML) host.innerHTML = ''; return; }
+    const lines = items.map((it) => `<div class="vc-apply-line"><b>${esc(it.name)}</b> ${esc(it.fmt(it.from))} → <b>${esc(it.fmt(it.value))}</b></div>`).join('');
+    const lc = this._theme === 'lcars';
+    const label = this._armed ? (lc ? 'Engage!' : 'Tap again to apply') : this._applyCfg.label || (lc ? 'Make it so.' : 'Apply changes');
+    const html = `<div class="vc-apply-title">Not applied yet</div>${lines}
+      <div class="vc-apply-actions">
+        <div class="vc-apply-btn cancel" data-act="cancel">Cancel</div>
+        <div class="vc-apply-btn go${this._armed ? ' armed' : ''}" data-act="apply">${esc(label)}</div>
+      </div>`;
+    if (host._html !== html) { host._html = html; host.innerHTML = html; }
+  }
+
   _maybeRender() {
     if (!this._hass || !this._root) return;
     if (!this._built) {
@@ -719,6 +874,7 @@ class VictronEssCard extends HTMLElement {
 
       ${missingNotice}
       ${this._missingConfig.length ? '' : this._sectionsHtml(statDefs, showStats)}
+      ${this._applyCfg && !this._missingConfig.length ? '<div class="vc-apply" id="applyBar"></div>' : ''}
       <div id="warnHost"></div>
     `;
 
@@ -743,8 +899,8 @@ class VictronEssCard extends HTMLElement {
         this._syncChargeChips(parseFloat(slider.value));
       });
       slider.addEventListener('change', () => {
-        this._call(domainOf(e.max_charge_current), 'set_value', { entity_id: e.max_charge_current, value: parseFloat(slider.value) });
         this._dragging = false;
+        this._setCharge(parseFloat(slider.value));
       });
     }
 
@@ -758,18 +914,66 @@ class VictronEssCard extends HTMLElement {
         this._paintExtra(i, parseFloat(slider.value));
       });
       slider.addEventListener('change', () => {
-        this._call(domainOf(x.entity), 'set_value', { entity_id: x.entity, value: parseFloat(slider.value) });
         this._xDrag[i] = false;
+        this._setExtra(i, parseFloat(slider.value));
       });
     });
 
     if (this._sections.automations_toggle && e.automations_enabled) {
       const sw = this._root.querySelector('#autoSwitch');
       sw.addEventListener('click', () => {
-        const on = this._state(e.automations_enabled, 'off') === 'on';
-        this._call(domainOf(e.automations_enabled), on ? 'turn_off' : 'turn_on', { entity_id: e.automations_enabled });
+        const cur = this._state(e.automations_enabled, 'off') === 'on';
+        const pend = this._pend('auto');
+        const shown = pend ? pend.value : cur;
+        const want = !shown;
+        this._change({
+          key: 'auto', group: 'automations_toggle', value: want, current: cur,
+          name: this._labels.automations || this._attr(e.automations_enabled, 'friendly_name', 'Automations'),
+          fmt: (v) => (v ? 'On' : 'Off'),
+          run: () => this._call(domainOf(e.automations_enabled), want ? 'turn_on' : 'turn_off', { entity_id: e.automations_enabled }),
+        });
       });
     }
+
+    const bar = this._root.querySelector('#applyBar');
+    if (bar) {
+      bar.addEventListener('click', (ev) => {
+        const t = ev.target.closest('[data-act]');
+        if (t) this._onApplyClick(t.dataset.act);
+      });
+    }
+  }
+
+  _setCharge(v) {
+    const id = this._entities.max_charge_current;
+    const unit = this._chargeUnit();
+    this._change({
+      key: 'charge', group: 'charge_current', value: v, current: this._num(id, NaN),
+      name: this._labels.charge_current, fmt: (n) => `${n} ${unit}`,
+      run: () => this._call(domainOf(id), 'set_value', { entity_id: id, value: v }),
+    });
+  }
+
+  _setExtra(i, v) {
+    const x = this._extra[i];
+    const unit = this._extraUnit(i);
+    this._change({
+      key: `x${i}`, group: 'extra_sliders', x, value: v, current: this._num(x.entity, NaN),
+      name: x.label || prettify((x.entity || '').split('.')[1] || ''), fmt: (n) => `${n}${unit ? ' ' + unit : ''}`,
+      run: () => this._call(domainOf(x.entity), 'set_value', { entity_id: x.entity, value: v }),
+    });
+  }
+
+  _setOption(kind, opt) {
+    const isEss = kind === 'ess';
+    const entity = isEss ? this._entities.ess_mode : this._entities.multiplus_mode;
+    const labels = isEss ? this._essLabels : this._mpLabels;
+    this._change({
+      key: kind, group: isEss ? 'ess_mode' : 'multiplus_mode', value: opt, current: this._state(entity, ''),
+      name: isEss ? this._labels.ess_mode : this._labels.multiplus_mode,
+      fmt: (o) => (o ? labels[o] || prettify(o) : '—'),
+      run: () => this._call(domainOf(entity), 'select_option', { entity_id: entity, option: opt }),
+    });
   }
 
   _statDefs() {
@@ -906,7 +1110,7 @@ class VictronEssCard extends HTMLElement {
       btn.className = 'vc-seg-btn';
       btn.dataset.opt = opt;
       btn.textContent = labels[opt] || prettify(opt);
-      btn.addEventListener('click', () => this._call(domainOf(entity), 'select_option', { entity_id: entity, option: opt }));
+      btn.addEventListener('click', () => this._setOption(kind, opt));
       host.appendChild(btn);
     });
   }
@@ -965,9 +1169,7 @@ class VictronEssCard extends HTMLElement {
         chip.className = 'vc-chip';
         chip.dataset.val = v;
         chip.textContent = `${v} ${unit}`;
-        chip.addEventListener('click', () => {
-          this._call(domainOf(this._entities.max_charge_current), 'set_value', { entity_id: this._entities.max_charge_current, value: v });
-        });
+        chip.addEventListener('click', () => this._setCharge(v));
         chipRow.appendChild(chip);
       });
     }
@@ -1018,13 +1220,15 @@ class VictronEssCard extends HTMLElement {
           chip.className = 'vc-chip';
           chip.dataset.val = v;
           chip.textContent = `${v}${unit ? ' ' + unit : ''}`;
-          chip.addEventListener('click', () => this._call(domainOf(x.entity), 'set_value', { entity_id: x.entity, value: v }));
+          chip.addEventListener('click', () => this._setExtra(i, v));
           row.appendChild(chip);
         });
       }
-      const val = this._num(x.entity, min);
+      const pend = this._pend(`x${i}`);
+      const val = pend ? pend.value : this._num(x.entity, min);
       slider.value = val;
       this._paintExtra(i, val);
+      this._markPending(`#xVal${i}`, `#xSlider${i}`, pend, (n) => `${n}${unit ? ' ' + unit : ''}`);
     });
   }
 
@@ -1163,23 +1367,34 @@ class VictronEssCard extends HTMLElement {
     if (this._sections.ess_mode) {
       this._syncSegments('ess');
       const essState = this._state(e.ess_mode, '');
-      root.querySelectorAll('#essSeg .vc-seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.opt === essState));
+      const essPend = this._pend('ess');
+      root.querySelectorAll('#essSeg .vc-seg-btn').forEach((b) => {
+        b.classList.toggle('active', b.dataset.opt === (essPend ? essPend.value : essState));
+        b.classList.toggle('pending', !!essPend && b.dataset.opt === essPend.value);
+      });
     }
     if (this._sections.multiplus_mode) {
       this._syncSegments('mp');
       const mpState = this._state(e.multiplus_mode, '');
-      root.querySelectorAll('#mpSeg .vc-seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.opt === mpState));
+      const mpPend = this._pend('mp');
+      root.querySelectorAll('#mpSeg .vc-seg-btn').forEach((b) => {
+        b.classList.toggle('active', b.dataset.opt === (mpPend ? mpPend.value : mpState));
+        b.classList.toggle('pending', !!mpPend && b.dataset.opt === mpPend.value);
+      });
     }
 
     // charge slider (skip while user is dragging it)
     if (this._sections.charge_current && !this._dragging) {
       const { min, max } = this._sliderLimits();
       if (this._syncSliderRange(min, max)) {
-        const val = this._num(e.max_charge_current, min);
+        const pend = this._pend('charge');
+        const val = pend ? pend.value : this._num(e.max_charge_current, min);
         const slider = root.querySelector('#chargeSlider');
         slider.value = val;
         this._paintSlider(val);
         this._syncChargeChips(val);
+        const unit = this._chargeUnit();
+        this._markPending('#chargeVal', '#chargeSlider', pend, (n) => `${n} ${unit}`);
       } else {
         root.querySelector('#chargeVal').textContent = '—';
       }
@@ -1190,8 +1405,10 @@ class VictronEssCard extends HTMLElement {
     // automations toggle
     if (this._sections.automations_toggle && e.automations_enabled) {
       const sw = root.querySelector('#autoSwitch');
-      const autoOn = this._state(e.automations_enabled, 'off') === 'on';
+      const autoPend = this._pend('auto');
+      const autoOn = autoPend ? autoPend.value : this._state(e.automations_enabled, 'off') === 'on';
       if (sw) sw.classList.toggle('on', autoOn);
+      if (sw) sw.classList.toggle('pending', !!autoPend);
       if (sw && sw.parentElement) sw.parentElement.classList.toggle('on', autoOn); // light style tints the row
       const label = root.querySelector('#autoLabel');
       if (label) {
@@ -1199,7 +1416,18 @@ class VictronEssCard extends HTMLElement {
       }
     }
 
+    this._renderApplyBar();
     this._renderWarnings();
+  }
+
+  // Shows "100 % → 50 %" on a value label and tints the slider while a change is waiting for Apply.
+  _markPending(valSel, sliderSel, pend, fmt) {
+    const val = this._root.querySelector(valSel);
+    const slider = this._root.querySelector(sliderSel);
+    if (!val) return;
+    if (pend) val.textContent = `${fmt(pend.from)} → ${fmt(pend.value)}`;
+    val.classList.toggle('pending', !!pend);
+    if (slider) slider.classList.toggle('pending', !!pend);
   }
 
   // Lists configured entities that do not exist in HA (typos, renamed or removed entities).
