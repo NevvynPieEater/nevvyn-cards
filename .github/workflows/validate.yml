@@ -15,6 +15,8 @@ jobs:
       - uses: hacs/action@main
         with:
           category: plugin
+          # Private-ish repo: not submitted to the default HACS store, so no description/topics (they aid discovery).
+          ignore: topics description
 
   syntax:
     name: JavaScript syntax
